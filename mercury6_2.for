@@ -117,6 +117,7 @@ c
       real*8 m(NMAX),xh(3,NMAX),vh(3,NMAX),s(3,NMAX),rho(NMAX)
       real*8 rceh(NMAX),epoch(NMAX),ngf(4,NMAX),rmax,rcen,jcen(3)
       real*8 cefac,time,tstart,tstop,dtout,h0,tol,en(3),am(3)
+      real*8 rplanet, j2planet
       character*8 id(NMAX)
       character*80 outfile(3), dumpfile(4), mem(NMESS)
       external mdt_mvs, mdt_bs1, mdt_bs2, mdt_ra15, mdt_hy
@@ -130,7 +131,8 @@ c
 c Get initial conditions and integration parameters
       call mio_in (time,tstart,tstop,dtout,algor,h0,tol,rmax,rcen,jcen,
      %  en,am,cefac,ndump,nfun,nbod,nbig,m,xh,vh,s,rho,rceh,stat,id,
-     %  epoch,ngf,opt,opflag,ngflag,outfile,dumpfile,lmem,mem)
+     %  epoch,ngf,opt,opflag,ngflag,outfile,dumpfile,lmem,mem,
+     %  rplanet,j2planet)
 c
 c If this is a new integration, integrate all the objects to a common epoch.
       if (opflag.eq.-2) then
@@ -138,7 +140,7 @@ c If this is a new integration, integrate all the objects to a common epoch.
         write (23,'(/,a)') mem(55)(1:lmem(55))
         write (*,'(a)') mem(55)(1:lmem(55))
         call mxx_sync (time,tstart,h0,tol,jcen,nbod,nbig,m,xh,vh,s,rho,
-     %    rceh,stat,id,epoch,ngf,opt,ngflag)
+     %    rceh,stat,id,epoch,ngf,opt,ngflag,rcen,rplanet,j2planet)
         write (23,'(/,a,/)') mem(56)(1:lmem(56))
         write (*,'(a)') mem(56)(1:lmem(56))
         opflag = -1
@@ -149,32 +151,33 @@ c Main integration
       if (algor.eq.1) call mal_hcon (time,tstart,tstop,dtout,algor,h0,
      %  tol,jcen,rcen,rmax,en,am,cefac,ndump,nfun,nbod,nbig,m,xh,vh,s,
      %  rho,rceh,stat,id,ngf,opt,opflag,ngflag,outfile,dumpfile,mem,
-     %  lmem,mdt_mvs,mco_h2mvs,mco_mvs2h)
+     %  lmem,mdt_mvs,mco_h2mvs,mco_mvs2h,rplanet,j2planet)
 c
       if (algor.eq.9) call mal_hcon (time,tstart,tstop,dtout,algor,h0,
      %  tol,jcen,rcen,rmax,en,am,cefac,ndump,nfun,nbod,nbig,m,xh,vh,s,
      %  rho,rceh,stat,id,ngf,opt,opflag,ngflag,outfile,dumpfile,mem,
-     %  lmem,mdt_mvs,mco_iden,mco_iden)
+     %  lmem,mdt_mvs,mco_iden,mco_iden,rplanet,j2planet)
 c
       if (algor.eq.2) call mal_hvar (time,tstart,tstop,dtout,algor,h0,
      %  tol,jcen,rcen,rmax,en,am,cefac,ndump,nfun,nbod,nbig,m,xh,vh,s,
      %  rho,rceh,stat,id,ngf,opt,opflag,ngflag,outfile,dumpfile,mem,
-     %  lmem,mdt_bs1)
+     %  lmem,mdt_bs1,rplanet,j2planet)
 c
       if (algor.eq.3) call mal_hvar (time,tstart,tstop,dtout,algor,h0,
      %  tol,jcen,rcen,rmax,en,am,cefac,ndump,nfun,nbod,nbig,m,xh,vh,s,
      %  rho,rceh,stat,id,ngf,opt,opflag,ngflag,outfile,dumpfile,mem,
-     %  lmem,mdt_bs2)
+     %  lmem,mdt_bs2,rplanet,j2planet)
 c
       if (algor.eq.4) call mal_hvar (time,tstart,tstop,dtout,algor,h0,
      %  tol,jcen,rcen,rmax,en,am,cefac,ndump,nfun,nbod,nbig,m,xh,vh,s,
      %  rho,rceh,stat,id,ngf,opt,opflag,ngflag,outfile,dumpfile,mem,
-     %  lmem,mdt_ra15)
+     %  lmem,mdt_ra15,rplanet,j2planet)
 c
       if (algor.eq.10) call mal_hcon (time,tstart,tstop,dtout,algor,h0,
      %  tol,jcen,rcen,rmax,en,am,cefac,ndump,nfun,nbod,nbig,m,xh,vh,s,
      %  rho,rceh,stat,id,ngf,opt,opflag,ngflag,outfile,dumpfile,mem,
-     %  lmem,mdt_hy,mco_h2dh,mco_dh2h)
+     %  lmem,mdt_hy,mco_h2dh,mco_dh2h,rplanet,j2planet)
+      write (*,*) 'algor10 is right'
 c
 c Do a final data dump
       do j = 2, nbod
@@ -225,25 +228,74 @@ c N.B. All coordinates and velocities must be with respect to central body
 c ===
 c------------------------------------------------------------------------------
 c
-      subroutine mfo_user (time,jcen,nbod,nbig,m,x,v,a)
+      subroutine mfo_user (time,jcen,nbod,m,x,v,s,a,rcen,rplanet,
+     %     j2planet)
 c
       implicit none
       include 'mercury.inc'
 c
 c Input/Output
-      integer nbod, nbig
+      integer nbod
       real*8 time,jcen(3),m(nbod),x(3,nbod),v(3,nbod),a(3,nbod)
+      real*8 rcen, rplanet, j2planet, s(3,nbod)
+      real*8 rx(3), rv(3), xe(3), fe(3), radius(2), j2(2), l(3)
+      real*8 torq, rx2, rv2, re2, s2, l2, sin_obl(2), cos_obl(2)
 c
 c Local
-      integer j
+      integer i, j
 c
 c------------------------------------------------------------------------------
+c
+      radius(1) = rcen
+      radius(2) = rplanet
+      j2(1) = jcen(1)
+      j2(2) = j2planet
 c
       do j = 1, nbod
         a(1,j) = 0.d0
         a(2,j) = 0.d0
         a(3,j) = 0.d0
-      end do
+      end do   
+c
+      do i = 2, 2
+         do j = 3, nbod
+            rx(1) = x(1,j) - x(1,i)
+            rx(2) = x(2,j) - x(2,i)
+            rx(3) = x(3,j) - x(3,i)
+            rx2 = rx(1)**2 + rx(2)**2 + rx(3)**2
+c
+            rv(1) = v(1,j) - v(1,i)
+            rv(2) = v(2,j) - v(2,i)
+            rv(3) = v(3,j) - v(3,i)
+            rv2 = rv(1)**2 + rv(2)**2 + rv(3)**2
+c
+            s2 = s(1,i)**2 + s(2,i)**2 + s(3,i)**2
+c
+            l(1) = rx(2)*rv(3) - rx(3)*rv(2)
+            l(2) = rx(3)*rv(1) - rx(1)*rv(3)
+            l(3) = rx(1)*rv(2) - rx(2)*rv(1)
+            l2 = l(1)**2 + l(2)**2 + l(3)**2
+c
+            cos_obl(i) = l(1)*s(1,i) + l(2)*s(2,i) + l(3)*s(3,i)
+            cos_obl(i) = cos_obl(i) / (s2*l2)**0.5
+            sin_obl(i) = (1 - cos_obl(i)**2)**0.5
+c
+            xe(1) = rx(1) * cos_obl(i) - rx(3) * sin_obl(i)
+            xe(2) = rx(2)
+            xe(3) = rx(1) * sin_obl(i) + rx(3) * cos_obl(i)
+            re2 = rx2
+c
+            torq = 3.0 * j2(i) * m(i) * radius(i)**2 / 2.0 / re2**3.5
+c
+            fe(1) = torq * xe(1) * (xe(1)**2 + xe(2)**2 - 4 * xe(3)**2)
+            fe(2) = torq * xe(2) * (xe(1)**2 + xe(2)**2 - 4 * xe(3)**2)
+            fe(3) = torq * xe(3) * (3 * (xe(1)**2 + xe(2)**2) 
+     %           - 2 * xe(3)**2)
+            a(1,j) = a(1,j) + fe(1) * cos_obl(i) + fe(3) * sin_obl(i)
+            a(2,j) = a(2,j) + fe(2)
+            a(3,j) = a(3,j) - fe(1) * sin_obl(i) + fe(3) * cos_obl(i)
+         end do 
+      end do 
 c
 c------------------------------------------------------------------------------
 c
@@ -269,8 +321,9 @@ c------------------------------------------------------------------------------
 c
       subroutine mal_hvar (time,tstart,tstop,dtout,algor,h0,tol,jcen,
      %  rcen,rmax,en,am,cefac,ndump,nfun,nbod,nbig,m,xh,vh,s,rho,rceh,
-     %  stat,id,ngf,opt,opflag,ngflag,outfile,dumpfile,mem,lmem,onestep)
-c
+     %  stat,id,ngf,opt,opflag,ngflag,outfile,dumpfile,mem,lmem,onestep
+     %  ,rplanet,j2planet)
+  
       implicit none
       include 'mercury.inc'
 c
@@ -292,6 +345,7 @@ c Local
       real*8 rce(NMAX),rphys(NMAX),rcrit(NMAX),a(NMAX)
       real*8 dclo(CMAX),tclo(CMAX),epoch(NMAX)
       real*8 ixvclo(6,CMAX),jxvclo(6,CMAX)
+      real*8 rplanet, j2planet
       external mfo_all,onestep
 c
 c------------------------------------------------------------------------------
@@ -523,7 +577,7 @@ c
       subroutine mal_hcon (time,tstart,tstop,dtout,algor,h0,tol,jcen,
      %  rcen,rmax,en,am,cefac,ndump,nfun,nbod,nbig,m,xh,vh,s,rho,rceh,
      %  stat,id,ngf,opt,opflag,ngflag,outfile,dumpfile,mem,lmem,onestep,
-     %  coord,bcoord)
+     %  coord,bcoord,rplanet,j2planet)
 c
       implicit none
       include 'mercury.inc'
@@ -545,6 +599,7 @@ c Local
       real*8 hby2,tout,tmp0,tdump,tfun,tlog,dtdump,dtfun
       real*8 dclo(CMAX),tclo(CMAX),dhit(CMAX),thit(CMAX)
       real*8 ixvclo(6,CMAX),jxvclo(6,CMAX),a(NMAX)
+      real*8 rplanet, j2planet
       external onestep,coord,bcoord
 c
 c------------------------------------------------------------------------------
@@ -589,7 +644,8 @@ c Beware: the integration may change direction at this point!!!!
         if (opflag.eq.-1.and.dtflag.ne.0) dtflag = 1
 c
 c Convert to heliocentric coordinates and output data for all bodies
-        call bcoord (time,jcen,nbod,nbig,h0,m,x,v,xh,vh,ngf,ngflag,opt)
+        call bcoord (time,jcen,nbod,nbig,h0,m,x,v,xh,vh,ngf,ngflag,opt
+     %  ,s,rcen,rplanet,j2planet)
         call mio_out (time,jcen,rcen,rmax,nbod,nbig,m,xh,vh,s,rho,
      %    stat,id,opt,opflag,algor,outfile(1))
         call mio_ce (time,tstart,rcen,rmax,nbod,nbig,m,stat,id,
@@ -610,7 +666,8 @@ c Update the data dump files
 c
 c If integration has finished, convert to heliocentric coords and return
       if (abs(tstop-time).le.hby2.and.opflag.ge.0) then
-        call bcoord (time,jcen,nbod,nbig,h0,m,x,v,xh,vh,ngf,ngflag,opt)
+        call bcoord (time,jcen,nbod,nbig,h0,m,x,v,xh,vh,ngf,ngflag,opt
+     %  ,s,rcen,rplanet,j2planet)
         return
       end if
 c
@@ -625,12 +682,13 @@ c Save the current heliocentric coordinates and velocities
         call mco_iden (time,jcen,nbod,nbig,h0,m,x,v,xh0,vh0,ngf,ngflag,
      %    opt)
       else
-        call bcoord(time,jcen,nbod,nbig,h0,m,x,v,xh0,vh0,ngf,ngflag,opt)
+        call bcoord(time,jcen,nbod,nbig,h0,m,x,v,xh0,vh0,ngf,ngflag,opt
+     %  ,s,rcen,rplanet,j2planet)
       end if
       call onestep (time,tstart,h0,tol,rmax,en,am,jcen,rcen,nbod,nbig,
      %  m,x,v,s,rphys,rcrit,rce,stat,id,ngf,algor,opt,dtflag,ngflag,
      %  opflag,colflag,nclo,iclo,jclo,dclo,tclo,ixvclo,jxvclo,outfile,
-     %  mem,lmem)
+     %  mem,lmem,rplanet,j2planet)
       time = time + h0
 c
 c------------------------------------------------------------------------------
@@ -655,7 +713,8 @@ c If collisions occurred, output details and remove lost objects
       if (colflag.ne.0) then
 c
 c Reindex the surviving objects
-        call bcoord (time,jcen,nbod,nbig,h0,m,x,v,xh,vh,ngf,ngflag,opt)
+        call bcoord (time,jcen,nbod,nbig,h0,m,x,v,xh,vh,ngf,ngflag,opt
+     %  ,s,rcen,rplanet,j2planet)
         call mxx_elim (nbod,nbig,m,xh,vh,s,rho,rceh,rcrit,ngf,stat,
      %    id,mem,lmem,outfile(3),itmp)
 c
@@ -675,7 +734,8 @@ c Check for collisions with the central body
       if (algor.eq.1) then
         call mco_iden(time,jcen,nbod,nbig,h0,m,x,v,xh,vh,ngf,ngflag,opt)
       else
-        call bcoord (time,jcen,nbod,nbig,h0,m,x,v,xh,vh,ngf,ngflag,opt)
+        call bcoord (time,jcen,nbod,nbig,h0,m,x,v,xh,vh,ngf,ngflag,opt
+     %  ,s,rcen,rplanet,j2planet)
       end if
       itmp = 2
       if (algor.eq.11.or.algor.eq.12) itmp = 3
@@ -720,7 +780,8 @@ c  DATA  DUMP  AND  PROGRESS  REPORT
 c
 c Convert to heliocentric coords and do the data dump
       if (abs(time-tdump).ge.abs(dtdump).and.opflag.ge.-1) then
-        call bcoord (time,jcen,nbod,nbig,h0,m,x,v,xh,vh,ngf,ngflag,opt)
+        call bcoord (time,jcen,nbod,nbig,h0,m,x,v,xh,vh,ngf,ngflag,opt
+     %  ,s,rcen,rplanet,j2planet)
         do j = 2, nbod
           epoch(j) = time
         end do
@@ -735,7 +796,8 @@ c Convert to heliocentric coords and do the data dump
 c
 c Convert to heliocentric coords and write a progress report to the log file
       if (abs(time-tlog).ge.abs(dtdump).and.opflag.ge.0) then
-        call bcoord (time,jcen,nbod,nbig,h0,m,x,v,xh,vh,ngf,ngflag,opt)
+        call bcoord (time,jcen,nbod,nbig,h0,m,x,v,xh,vh,ngf,ngflag,opt
+     %  ,s,rcen,rplanet,j2planet)
         call mxx_en (jcen,nbod,nbig,m,xh,vh,s,en(2),am(2))
         call mio_log (time,tstart,en,am,opt,mem,lmem)
         tlog = time
@@ -750,7 +812,8 @@ c
           call mco_iden (time,jcen,nbod,nbig,h0,m,x,v,xh,vh,ngf,ngflag,
      %      opt)
         else
-          call bcoord(time,jcen,nbod,nbig,h0,m,x,v,xh,vh,ngf,ngflag,opt)
+          call bcoord(time,jcen,nbod,nbig,h0,m,x,v,xh,vh,ngf,ngflag,opt
+     %  ,s,rcen,rplanet,j2planet)
         end if
 c
 c Recompute close encounter limits, to allow for changes in Hill radii
@@ -1903,7 +1966,7 @@ c
 c------------------------------------------------------------------------------
 c
       subroutine mco_mvs2h (time,jcen,nbod,nbig,h,m,x,v,xh,vh,ngf,
-     %  ngflag,opt)
+     %  ngflag,opt,s,rcen,rplanet,j2planet)
 c
       implicit none
       include 'mercury.inc'
@@ -1917,6 +1980,7 @@ c Local
       integer j,k,iflag,stat(NMAX)
       real*8 minside,msofar,gm(NMAX),a(3,NMAX),xj(3,NMAX),vj(3,NMAX)
       real*8 ha(2),hb(2),rt10,angf(3,NMAX),ausr(3,NMAX)
+      real*8 s(3,nbod),rcen,rplanet,j2planet
 c
 c------------------------------------------------------------------------------
 c
@@ -1964,8 +2028,8 @@ c Advance Interaction Hamiltonian
         call mfo_mvs (jcen,nbod,nbig,m,xh,xj,a,stat)
 c
 c If required, apply non-gravitational and user-defined forces
-        if (opt(8).eq.1) call mfo_user (time,jcen,nbod,nbig,m,xh,vh,
-     %    ausr)
+        if (opt(8).eq.1) call mfo_user (time,jcen,nbod,m,xh,vh,s,
+     %    ausr,rcen,rplanet,j2planet)
         if (ngflag.eq.1.or.ngflag.eq.3) call mfo_ngf (nbod,xh,vh,angf,
      %    ngf)
 c
@@ -1993,8 +2057,8 @@ c Advance Interaction Hamiltonian
         call mfo_mvs (jcen,nbod,nbig,m,xh,xj,a,stat)
 c
 c If required, apply non-gravitational and user-defined forces
-        if (opt(8).eq.1) call mfo_user (time,jcen,nbod,nbig,m,xh,vh,
-     %    ausr)
+        if (opt(8).eq.1) call mfo_user (time,jcen,nbod,m,xh,vh,s,
+     %    ausr,rcen,rplanet,j2planet)
         if (ngflag.eq.1.or.ngflag.eq.3) call mfo_ngf (nbod,xh,vh,angf,
      %    ngf)
 c
@@ -2215,7 +2279,7 @@ c
 c------------------------------------------------------------------------------
 c
       subroutine mco_h2mvs (time,jcen,nbod,nbig,h,m,xh,vh,x,v,ngf,
-     %  ngflag,opt)
+     %  ngflag,opt,s,rcen,rplanet,j2planet)
 c
       implicit none
       include 'mercury.inc'
@@ -2229,6 +2293,7 @@ c Local
       integer j,k,iflag,stat(NMAX)
       real*8 minside,msofar,gm(NMAX),a(3,NMAX),xj(3,NMAX),vj(3,NMAX)
       real*8 ha(2),hb(2),rt10,angf(3,NMAX),ausr(3,NMAX)
+      real*8 s(3,nbod),rcen,rplanet,j2planet
 c
 c------------------------------------------------------------------------------
 c
@@ -2275,7 +2340,8 @@ c Advance Interaction Hamiltonian
         call mfo_mvs (jcen,nbod,nbig,m,x,xj,a,stat)
 c
 c If required, apply non-gravitational and user-defined forces
-        if (opt(8).eq.1) call mfo_user (time,jcen,nbod,nbig,m,x,v,ausr)
+        if (opt(8).eq.1) call mfo_user (time,jcen,nbod,m,x,v,s,
+     %    ausr,rcen,rplanet,j2planet)
         if (ngflag.eq.1.or.ngflag.eq.3) call mfo_ngf (nbod,x,v,angf,ngf)
 c
         do j = 2, nbod
@@ -2302,7 +2368,8 @@ c Advance Interaction Hamiltonian
         call mfo_mvs (jcen,nbod,nbig,m,x,xj,a,stat)
 c
 c If required, apply non-gravitational and user-defined forces
-        if (opt(8).eq.1) call mfo_user (time,jcen,nbod,nbig,m,x,v,ausr)
+        if (opt(8).eq.1) call mfo_user (time,jcen,nbod,m,x,v,s,
+     %    ausr,rcen,rplanet,j2planet)
         if (ngflag.eq.1.or.ngflag.eq.3) call mfo_ngf (nbod,x,v,angf,ngf)
 c
         do j = 2, nbod
@@ -3387,7 +3454,7 @@ c
       subroutine mdt_hy (time,tstart,h0,tol,rmax,en,am,jcen,rcen,nbod,
      %  nbig,m,x,v,s,rphys,rcrit,rce,stat,id,ngf,algor,opt,dtflag,
      %  ngflag,opflag,colflag,nclo,iclo,jclo,dclo,tclo,ixvclo,jxvclo,
-     %  outfile,mem,lmem)
+     %  outfile,mem,lmem,rplanet,j2planet)
 c
       implicit none
       include 'mercury.inc'
@@ -3406,6 +3473,7 @@ c Local
       integer j,nce,ice(NMAX),jce(NMAX),ce(NMAX),iflag
       real*8 a(3,NMAX),hby2,hrec,x0(3,NMAX),v0(3,NMAX),mvsum(3),temp
       real*8 angf(3,NMAX),ausr(3,NMAX)
+      real*8 rplanet, j2planet
       external mfo_hkce
 c
 c------------------------------------------------------------------------------
@@ -3429,7 +3497,8 @@ c If accelerations from previous call are not valid, calculate them now
           ausr(3,j) = 0.d0
         end do
 c If required, apply non-gravitational and user-defined forces
-        if (opt(8).eq.1) call mfo_user (time,jcen,nbod,nbig,m,x,v,ausr)
+        if (opt(8).eq.1) call mfo_user (time,jcen,nbod,m,x,v,s,
+     %    ausr,rcen,rplanet,j2planet)
         if (ngflag.eq.1.or.ngflag.eq.3) call mfo_ngf (nbod,x,v,angf,ngf)
       end if
 c
@@ -3513,7 +3582,8 @@ c
 c
 c Advance interaction Hamiltonian for H/2
       call mfo_hy (jcen,nbod,nbig,m,x,rcrit,a,stat)
-      if (opt(8).eq.1) call mfo_user (time,jcen,nbod,nbig,m,x,v,ausr)
+      if (opt(8).eq.1) call mfo_user (time,jcen,nbod,m,x,v,s,
+     %    ausr,rcen,rplanet,j2planet)
       if (ngflag.eq.1.or.ngflag.eq.3) call mfo_ngf (nbod,x,v,angf,ngf)
 c
       do j = 2, nbod
@@ -3701,7 +3771,7 @@ c
       subroutine mdt_mvs (time,tstart,h0,tol,rmax,en,am,jcen,rcen,nbod,
      %  nbig,m,x,v,s,rphys,rcrit,rce,stat,id,ngf,algor,opt,dtflag,
      %  ngflag,opflag,colflag,nclo,iclo,jclo,dclo,tclo,ixvclo,jxvclo,
-     %  outfile,mem,lmem)
+     %  outfile,mem,lmem,rplanet,j2planet)
 c
       implicit none
       include 'mercury.inc'
@@ -3721,6 +3791,7 @@ c Local
       real*8 xj(3,NMAX),vj(3,NMAX),a(3,NMAX),gm(NMAX),hby2,thit1,temp
       real*8 msofar,minside,x0(3,NMAX),v0(3,NMAX),dhit(CMAX),thit(CMAX)
       real*8 angf(3,NMAX),ausr(3,NMAX)
+      real*8 rplanet, j2planet
 c
 c------------------------------------------------------------------------------
 c
@@ -3748,7 +3819,8 @@ c
           ausr(3,j) = 0.d0
         end do
 c If required, apply non-gravitational and user-defined forces
-        if (opt(8).eq.1) call mfo_user (time,jcen,nbod,nbig,m,x,v,ausr)
+        if (opt(8).eq.1) call mfo_user (time,jcen,nbod,m,x,v,s,
+     %    ausr,rcen,rplanet,j2planet)
         if (ngflag.eq.1.or.ngflag.eq.3) call mfo_ngf (nbod,x,v,angf,ngf)
       end if
 c
@@ -3784,7 +3856,8 @@ c Check for close-encounter minima during drift step
 c
 c Advance interaction Hamiltonian for H/2
       call mfo_mvs (jcen,nbod,nbig,m,x,xj,a,stat)
-      if (opt(8).eq.1) call mfo_user (time,jcen,nbod,nbig,m,x,v,ausr)
+      if (opt(8).eq.1) call mfo_user (time,jcen,nbod,m,x,v,s,
+     %    ausr,rcen,rplanet,j2planet)
       if (ngflag.eq.1.or.ngflag.eq.3) call mfo_ngf (nbod,x,v,angf,ngf)
 c
       do j = 2, nbod
@@ -4187,7 +4260,7 @@ c
 c------------------------------------------------------------------------------
 c
       subroutine mfo_all (time,jcen,nbod,nbig,m,x,v,s,rcrit,a,stat,ngf,
-     %  ngflag,opt,nce,ice,jce)
+     %  ngflag,opt,nce,ice,jce,rcen,rplanet,j2planet)
 c
       implicit none
       include 'mercury.inc'
@@ -4200,6 +4273,7 @@ c
 c Local
       integer j
       real*8 acor(3,NMAX),acen(3)
+      real*8 rcen, rplanet, j2planet
 c
 c------------------------------------------------------------------------------
 c
@@ -4248,7 +4322,8 @@ c Include post-Newtonian corrections if required
 c
 c Include user-defined accelerations if required
       if (opt(8).eq.1) then
-        call mfo_user (time,jcen,nbod,nbig,m,x,v,acor)
+        call mfo_user (time,jcen,nbod,m,x,v,s,
+     %    acor,rcen,rplanet,j2planet)
         do j = 2, nbod
           a(1,j) = a(1,j) + acor(1,j)
           a(2,j) = a(2,j) + acor(2,j)
@@ -5539,7 +5614,8 @@ c------------------------------------------------------------------------------
 c
       subroutine mio_in (time,tstart,tstop,dtout,algor,h0,tol,rmax,rcen,
      %  jcen,en,am,cefac,ndump,nfun,nbod,nbig,m,x,v,s,rho,rceh,stat,id,
-     %  epoch,ngf,opt,opflag,ngflag,outfile,dumpfile,lmem,mem)
+     % epoch,ngf,opt,opflag,ngflag,outfile,dumpfile,lmem,mem,
+     %  rplanet,j2planet)
 c
       implicit none
       include 'mercury.inc'
@@ -5562,6 +5638,7 @@ c      real*8 v0(3,NMAX),x0(3,NMAX)
       character*3 c3,alg(60)
       character*80 infile(3),filename,c80
       character*150 string
+      real*8 rplanet, j2planet
 c
 c------------------------------------------------------------------------------
 c
@@ -5680,7 +5757,7 @@ c Check if the file containing integration parameters exists, and open it
 c
 c Read integration parameters
       lineno = 0
-      do j = 1, 26
+      do j = 1, 28
   40    lineno = lineno + 1
         read (13,'(a150)') string
         if (string(1:1).eq.')') goto 40
@@ -5728,6 +5805,8 @@ c Read integration parameters
         if (j.eq.24) read (c80,*,err=661) cefac
         if (j.eq.25) read (c80,*,err=661) ndump
         if (j.eq.26) read (c80,*,err=661) nfun
+        if (j.eq.27) read (c80,*,err=661) rplanet
+        if (j.eq.28) read (c80,*,err=661) j2planet
       end do
       h0 = abs(h0)
       tol = abs(tol)
@@ -6971,7 +7050,7 @@ c
 c------------------------------------------------------------------------------
 c
       subroutine mxx_sync (time,tstart,h0,tol,jcen,nbod,nbig,m,x,v,s,
-     %  rho,rceh,stat,id,epoch,ngf,opt,ngflag)
+     %  rho,rceh,stat,id,epoch,ngf,opt,ngflag,rcen,rplanet,j2planet)
 c
       implicit none
       include 'mercury.inc'
@@ -6988,6 +7067,7 @@ c Local
       real*8 temp,epsml(NMAX),rtemp(NMAX)
       real*8 h,hdid,tsmall,rphys(NMAX),rcrit(NMAX)
       character*8 ctemp(NMAX)
+      real*8 rcen,rplanet,j2planet
       external mfo_all
 c
 c------------------------------------------------------------------------------
